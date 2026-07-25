@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline · Fitness Tracker</title>
+    <style>
+      :root {
+        color-scheme: dark light;
+        --bg: #0b0d10;
+        --surface: #14171c;
+        --border: #272c35;
+        --text: #eef1f5;
+        --muted: #9aa3b2;
+        --accent: #ff7a1a;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f7f8fa;
+          --surface: #ffffff;
+          --border: #dfe3ea;
+          --text: #12151a;
+          --muted: #5b6473;
+          --accent: #e2620a;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 22rem;
+        text-align: center;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        color: var(--muted);
+        font-size: 0.9375rem;
+        line-height: 1.5;
+        margin: 0 0 1.5rem;
+      }
+      button {
+        width: 100%;
+        padding: 0.875rem 1rem;
+        font: inherit;
+        font-weight: 600;
+        color: #1a0e04;
+        background: var(--accent);
+        border: 0;
+        border-radius: 0.75rem;
+      }
+      .note {
+        margin-top: 1.25rem;
+        padding: 0.875rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: var(--surface);
+        font-size: 0.8125rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>You're offline</h1>
+      <p>
+        This page hasn't been opened on this device yet, so there's no cached copy to show.
+      </p>
+      <button type="button" onclick="location.reload()">Try again</button>
+      <p class="note">
+        Any sets you've already logged are safe on this device and will sync by themselves once
+        you're back online.
+      </p>
+    </main>
+  </body>
+</html>

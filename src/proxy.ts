@@ -16,11 +16,19 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
  * a matcher change could otherwise silently drop coverage.
  */
 
-/** Reachable without a session, or the login flow itself cannot complete. */
+/**
+ * Reachable without a session.
+ *
+ * Beyond the login flow itself, this covers the PWA surface. The service worker
+ * precaches `/offline.html` at install time; if the gate redirected that request
+ * the worker would cache a login page as the offline fallback, which would then
+ * be shown in place of the real one.
+ */
 const PUBLIC_PATHS = new Set([
   "/login",
   "/manifest.webmanifest",
   "/sw.js",
+  "/offline.html",
   "/favicon.ico",
   "/robots.txt",
 ]);
