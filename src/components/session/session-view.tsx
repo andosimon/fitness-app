@@ -1,15 +1,18 @@
 "use client";
 
 import { useLiveQuery } from "dexie-react-hooks";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { getLocalDb, isLocalDbAvailable, type CachedExercise, type LocalSetLog } from "@/lib/offline/db";
 import {
   cacheExercises,
+  countSetsForSessions,
   deleteSet,
   discardSession,
   finishSession,
   getActiveSession,
+  getRecentCompletedSessions,
   logSet,
   startSession,
 } from "@/lib/offline/session";
@@ -87,6 +90,74 @@ function SyncStatus() {
       {result?.status === "partial" ? ` · ${result.rejected} rejected: ${result.firstReason}` : ""}
       {result?.status === "error" ? ` · ${result.message}` : ""}
     </p>
+  );
+}
+
+/**
+ * Recently finished sessions, shown when nothing is in progress.
+ *
+ * Read from the local mirror so a session appears the instant it is finished,
+ * without waiting for a sync or a server round trip. Previously, finishing a
+ * session left the screen showing only "No session in progress", which made the
+ * logged work look like it had disappeared.
+ */
+function RecentSessions() {
+  const recent = useLiveQuery(
+    () =>
+      isLocalDbAvailable()
+        ? getRecentCompletedSessions(3)
+        : Promise.resolve([] as Awaited<ReturnType<typeof getRecentCompletedSessions>>),
+    [],
+    [],
+  );
+
+  const counts = useLiveQuery(
+    () => countSetsForSessions(recent.map((s) => s.id)),
+    [recent.map((s) => s.id).join(",")],
+    {} as Record<string, number>,
+  );
+
+  if (recent.length === 0) return null;
+
+  return (
+    <section className="mt-8">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-medium text-muted">Recent</h2>
+        <Link href="/history" className="text-sm text-muted transition-colors hover:text-text">
+          All history →
+        </Link>
+      </div>
+
+      <ul className="mt-2 flex flex-col gap-2">
+        {recent.map((s) => (
+          <li key={s.id}>
+            <Link
+              href={`/history/${s.id}`}
+              className="block rounded-xl border border-border bg-surface px-4 py-3 transition-colors hover:border-accent"
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-medium">{s.name}</span>
+                <span className="shrink-0 font-mono text-xs text-muted">
+                  {counts[s.id] ?? 0} set{(counts[s.id] ?? 0) === 1 ? "" : "s"}
+                </span>
+              </div>
+              <span className="mt-0.5 block text-xs text-muted">
+                {s.completedAt
+                  ? new Date(s.completedAt).toLocaleString(undefined, {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : null}
+                {s.dirty === 1 ? " · not yet synced" : ""}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -196,7 +267,10 @@ export function SessionView({ exercises: serverExercises }: { exercises: CachedE
         >
           Start a session
         </button>
-        <SyncStatus />
+        <div className="mt-2">
+          <SyncStatus />
+        </div>
+        <RecentSessions />
       </div>
     );
   }

@@ -59,6 +59,40 @@ export async function getActiveSession(): Promise<LocalSession | undefined> {
   return open.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 }
 
+/**
+ * Recently finished sessions, newest first.
+ *
+ * Read from the local mirror rather than the server so a session that was just
+ * completed appears immediately — including when there is no connection to sync
+ * it yet.
+ */
+export async function getRecentCompletedSessions(limit = 3): Promise<LocalSession[]> {
+  const db = getLocalDb();
+  const done = await db.sessions
+    .filter((s) => s.completedAt !== null && s.deleted === 0)
+    .toArray();
+  return done
+    .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))
+    .slice(0, limit);
+}
+
+/** Set counts per session id, for summarising the list above. */
+export async function countSetsForSessions(
+  sessionIds: string[],
+): Promise<Record<string, number>> {
+  if (sessionIds.length === 0) return {};
+  const db = getLocalDb();
+  const counts: Record<string, number> = {};
+  for (const id of sessionIds) {
+    counts[id] = await db.setLogs
+      .where("sessionId")
+      .equals(id)
+      .filter((s) => s.deleted === 0)
+      .count();
+  }
+  return counts;
+}
+
 export async function finishSession(
   sessionId: string,
   input: { perceivedEffort?: number | null; notes?: string | null } = {},
