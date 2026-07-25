@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Setup" },
+  { href: "/", label: "Today" },
   { href: "/exercises", label: "Exercises" },
+  { href: "/setup", label: "Setup" },
 ];
 
 export function AppNav() {

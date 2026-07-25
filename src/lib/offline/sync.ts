@@ -34,15 +34,36 @@ export async function countPending(): Promise<number> {
 
 let inFlight: Promise<SyncResult> | null = null;
 
+type Listener = (result: SyncResult) => void;
+const listeners = new Set<Listener>();
+
+/**
+ * Subscribes to every sync outcome, whoever triggered it.
+ *
+ * Needed because most pushes are kicked off by logging a set, not by the
+ * lifecycle triggers. Without this the UI would never learn that a push failed
+ * and would sit on "syncing…" indefinitely — precisely when the user wants to
+ * know their set is safely on the device.
+ */
+export function subscribeSyncResult(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 /**
  * Pushes every dirty row. Concurrent calls share one request, so the several
  * triggers (a set being logged, coming back online, the tab regaining focus)
  * cannot stampede.
  */
 export function pushPending(): Promise<SyncResult> {
-  inFlight ??= run().finally(() => {
-    inFlight = null;
-  });
+  inFlight ??= run()
+    .then((result) => {
+      for (const listener of listeners) listener(result);
+      return result;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
   return inFlight;
 }
 
@@ -130,11 +151,12 @@ async function run(): Promise<SyncResult> {
  * background tabs, so returning to the app is often the first chance to push
  * sets logged while the screen was off.
  */
-export function startAutoSync(onResult?: (result: SyncResult) => void): () => void {
+export function startAutoSync(): () => void {
   if (typeof window === "undefined") return () => {};
 
+  // Results reach the UI via subscribeSyncResult, so nothing is returned here.
   const trigger = () => {
-    void pushPending().then((result) => onResult?.(result));
+    void pushPending().catch(() => {});
   };
 
   // Named so teardown can actually remove it — an inline arrow here would leak
