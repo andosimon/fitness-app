@@ -55,13 +55,26 @@ npm run dev
 
 ### Environment variables
 
-| Variable            | Required     | Purpose                                        |
-| ------------------- | ------------ | ---------------------------------------------- |
-| `DATABASE_URL`      | yes          | Neon **pooled** connection string              |
-| `APP_PASSWORD`      | yes          | The password used to sign in                   |
-| `SESSION_SECRET`    | yes          | Signs the session cookie; 32+ chars            |
-| `ANTHROPIC_API_KEY` | Phase 4 only | Coach access; billed separately from Claude.ai |
-| `FEATURE_COACH`     | no           | `"true"` turns the coach on                    |
+| Variable               | Required     | Purpose                                        |
+| ---------------------- | ------------ | ---------------------------------------------- |
+| `FITNESS_DATABASE_URL` | yes\*        | Neon **pooled** connection string              |
+| `DATABASE_URL`         | yes\*        | Fallback if the above is unset                 |
+| `APP_PASSWORD`         | yes          | The password used to sign in                   |
+| `SESSION_SECRET`       | yes          | Signs the session cookie; 32+ chars            |
+| `ANTHROPIC_API_KEY`    | Phase 4 only | Coach access; billed separately from Claude.ai |
+| `FEATURE_COACH`        | no           | `"true"` turns the coach on                    |
+
+\* Set one of the two. `FITNESS_DATABASE_URL` wins.
+
+**Why two names.** Vercel's Neon integration installs `DATABASE_URL` as a
+*managed* variable: it cannot be edited in the dashboard, and it points at the
+Neon project's default database (`neondb`). This app uses its own `fitness`
+database, so `FITNESS_DATABASE_URL` provides a way to redirect it without
+disconnecting the integration. The connection string must end in `/fitness`.
+
+The setup status page names the database it actually reached and counts the
+exercise rows, rather than running `select 1` — which would report success
+against any database, including one where the schema does not exist.
 
 Generate a session secret with:
 

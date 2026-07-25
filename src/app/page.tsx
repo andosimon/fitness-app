@@ -2,32 +2,60 @@ import { sql } from "drizzle-orm";
 import { connection } from "next/server";
 
 import { logout } from "@/app/login/actions";
-import { getDb, isDatabaseConfigured } from "@/lib/db";
+import { getDb, resolveConnection } from "@/lib/db";
+
+const EXPECTED_DATABASE = "fitness";
 
 type DbStatus =
   | { state: "not_configured" }
-  | { state: "connected" }
-  | { state: "error"; message: string };
+  | { state: "connected"; database: string; exercises: number; source: string }
+  | { state: "error"; message: string; source: string };
 
 /**
  * Proves the deploy is genuinely wired end-to-end rather than merely rendering.
- * `connection()` forces per-request execution so `process.env` is read at
- * runtime instead of being inlined at build time.
+ *
+ * Checks which database it reached and counts a real table, rather than running
+ * `select 1`. That distinction matters: `select 1` succeeds against *any*
+ * database, so it would report a healthy connection while pointing somewhere the
+ * schema does not exist. Naming the database and proving the tables are present
+ * is what actually tells you the deployment is correct.
+ *
+ * `connection()` forces per-request execution so `process.env` is read at runtime
+ * instead of being inlined at build time.
  */
 async function checkDatabase(): Promise<DbStatus> {
   await connection();
 
-  if (!isDatabaseConfigured()) return { state: "not_configured" };
+  const conn = resolveConnection();
+  if (!conn) return { state: "not_configured" };
 
   try {
-    await getDb().execute(sql`select 1`);
-    return { state: "connected" };
-  } catch (error) {
+    const result = await getDb().execute<{ db: string; n: number }>(
+      sql`select current_database() as db, (select count(*)::int from exercises) as n`,
+    );
+    const meta = result.rows[0];
     return {
-      state: "error",
-      message: error instanceof Error ? error.message : "Unknown error",
+      state: "connected",
+      database: String(meta.db),
+      exercises: Number(meta.n),
+      source: conn.source,
     };
+  } catch (error) {
+    return { state: "error", message: describeDbError(error), source: conn.source };
   }
+}
+
+/**
+ * Drizzle wraps driver errors in a generic "Failed query" message that omits the
+ * actual reason, so the underlying Postgres error is unwrapped from `cause`.
+ * Without this, a missing table reads as an unexplained failure rather than
+ * "relation does not exist" — which is the one thing worth knowing.
+ */
+function describeDbError(error: unknown): string {
+  if (!(error instanceof Error)) return "Unknown error";
+  const cause = error.cause;
+  if (cause instanceof Error && cause.message) return cause.message;
+  return error.message;
 }
 
 function StatusRow({ label, ok, detail }: { label: string; ok: boolean | null; detail: string }) {
@@ -78,13 +106,20 @@ export default async function HomePage() {
 
         <StatusRow
           label="Database"
-          ok={db.state === "connected" ? true : db.state === "not_configured" ? null : false}
+          ok={
+            db.state === "not_configured"
+              ? null
+              : db.state === "connected" && db.database === EXPECTED_DATABASE
+          }
           detail={
             db.state === "connected"
-              ? "Connected to Neon."
+              ? db.database === EXPECTED_DATABASE
+                ? `Connected to "${db.database}" via ${db.source}. ${db.exercises} exercises loaded.`
+                : `Connected to "${db.database}", but expected "${EXPECTED_DATABASE}". ` +
+                  `Point ${db.source} at the ${EXPECTED_DATABASE} database.`
               : db.state === "not_configured"
-                ? "DATABASE_URL not set. Create a Neon database and add the connection string."
-                : `Connection failed: ${db.message}`
+                ? "No connection string. Set FITNESS_DATABASE_URL or DATABASE_URL."
+                : `Query failed via ${db.source}: ${db.message}`
           }
         />
 

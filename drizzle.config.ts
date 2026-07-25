@@ -10,7 +10,9 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "",
+    // Mirrors the precedence in src/lib/db/index.ts, so migrations and the app
+    // can never end up pointed at different databases.
+    url: process.env.FITNESS_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   },
   verbose: true,
   strict: true,
