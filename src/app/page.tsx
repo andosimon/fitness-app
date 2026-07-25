@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { connection } from "next/server";
 
 import { logout } from "@/app/login/actions";
+import { AppNav } from "@/components/app-nav";
 import { getDb, resolveConnection } from "@/lib/db";
 
 const EXPECTED_DATABASE = "fitness";
@@ -85,12 +86,11 @@ export default async function HomePage() {
   const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 p-6">
+    <>
+      <AppNav />
+      <main className="mx-auto w-full max-w-2xl flex-1 p-4">
       <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Fitness Tracker</h1>
-          <p className="mt-1 text-sm text-muted">Setup status</p>
-        </div>
+        <h1 className="text-xl font-semibold tracking-tight">Setup</h1>
         <form action={logout}>
           <button
             type="submit"
@@ -147,6 +147,7 @@ export default async function HomePage() {
           ))}
         </ol>
       </section>
-    </main>
+      </main>
+    </>
   );
 }
