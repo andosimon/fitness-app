@@ -41,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# `vercel link` appends its own .vercel and .env* entries here. They are already
+# covered above, and re-adding .env* after the !.env.example negation would
+# silently start ignoring the committed template — later patterns win in
+# gitignore. Left deduplicated on purpose; if `vercel link` re-adds them, remove
+# them again rather than reordering the block above.
