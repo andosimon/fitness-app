@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "seed": "tsx scripts/seed.ts",
     "budget": "tsx scripts/preview-budget.ts",
-    "volume": "tsx scripts/preview-volume.ts"
+    "volume": "tsx scripts/preview-volume.ts",
+    "program": "tsx scripts/preview-program.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
