@@ -129,7 +129,14 @@ export const EQUIPMENT = [
   "jump_rope",
   "weight_vest",
   "dip_belt",
+  /** Cuffs for attaching a cable to the ankle. */
   "ankle_straps",
+  /**
+   * Weighted cuffs worn on the ankle. Distinct from `ankle_straps`: these
+   * provide load without a cable, which is the only practical way to train knee
+   * flexion and extension in a home gym with no dedicated machines.
+   */
+  "ankle_weights",
   // Conditioning machines
   "treadmill",
   "stationary_bike",
@@ -164,18 +171,38 @@ export const EQUIPMENT_PRESETS = {
     "stationary_bike",
     "cable_machine",
   ],
+  /**
+   * The owner's actual home gym — the default training location, so this is the
+   * profile the generator runs against most often.
+   *
+   * `lat_pulldown` is included because the dual pulley system covers pulldowns.
+   * `ankle_weights` stand in for leg curl and extension machines: without them
+   * knee flexion and knee extension would be unprogrammable here.
+   *
+   * Deliberately absent: ergometers, sled and battle ropes, so conditioning in
+   * this profile falls back to bodyweight and carries.
+   */
   home_gym: [
     "bodyweight",
     "wall",
     "bench_or_chair",
     "barbell",
     "weight_plate",
-    "squat_rack",
-    "bench_adjustable",
+    "trap_bar",
+    "landmine",
     "dumbbell",
     "kettlebell",
+    "squat_rack",
+    "bench_flat",
+    "bench_adjustable",
     "pullup_bar",
+    "dip_bars",
+    "box_plyo",
+    "cable_machine",
+    "lat_pulldown",
     "resistance_band_long",
+    "mini_band",
+    "ankle_weights",
   ],
   commercial_gym: [...EQUIPMENT] as Equipment[],
 } satisfies Record<string, Equipment[]>;

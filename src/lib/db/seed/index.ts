@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { equipmentProfiles, exercises, type NewExercise } from "@/lib/db/schema";
@@ -96,24 +96,46 @@ export async function seedExercises(): Promise<{ count: number }> {
   return { count: rows.length };
 }
 
-/** Creates the preset equipment profiles, unless the user already has some. */
-export async function seedEquipmentProfiles(): Promise<number> {
+/**
+ * Creates or refreshes the preset equipment profiles.
+ *
+ * Matched on name and updated in place rather than skipped when any profile
+ * exists, so editing a preset (say, after buying a piece of kit) actually takes
+ * effect on reseed. Profiles the user has created themselves are left alone,
+ * since their names will not match a preset label.
+ */
+export async function seedEquipmentProfiles(): Promise<{ created: number; updated: number }> {
   const db = getDb();
-  const existing = await db.select({ id: equipmentProfiles.id }).from(equipmentProfiles).limit(1);
-  if (existing.length > 0) return 0;
-
   const presets = Object.entries(EQUIPMENT_PRESETS) as [
     keyof typeof EQUIPMENT_PRESETS,
     Equipment[],
   ][];
 
-  await db.insert(equipmentProfiles).values(
-    presets.map(([key, equipment]) => ({
-      name: EQUIPMENT_PRESET_LABELS[key],
-      equipment,
-      isDefault: key === "commercial_gym",
-    })),
-  );
+  const existing = await db
+    .select({ id: equipmentProfiles.id, name: equipmentProfiles.name })
+    .from(equipmentProfiles);
+  const byName = new Map(existing.map((row) => [row.name, row.id]));
 
-  return presets.length;
+  let created = 0;
+  let updated = 0;
+
+  for (const [key, equipment] of presets) {
+    const name = EQUIPMENT_PRESET_LABELS[key];
+    // The home gym is the usual training location, so it is the default.
+    const isDefault = key === "home_gym";
+    const id = byName.get(name);
+
+    if (id) {
+      await db
+        .update(equipmentProfiles)
+        .set({ equipment, isDefault })
+        .where(eq(equipmentProfiles.id, id));
+      updated++;
+    } else {
+      await db.insert(equipmentProfiles).values({ name, equipment, isDefault });
+      created++;
+    }
+  }
+
+  return { created, updated };
 }

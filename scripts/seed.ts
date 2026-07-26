@@ -9,9 +9,7 @@ async function main() {
 
   const profiles = await seedEquipmentProfiles();
   console.log(
-    profiles > 0
-      ? `equipment profiles: created ${profiles}`
-      : "equipment profiles: already present, left alone",
+    `equipment profiles: ${profiles.created} created, ${profiles.updated} updated`,
   );
 
   const { count } = await seedExercises();
