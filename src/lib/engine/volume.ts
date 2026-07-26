@@ -5,6 +5,8 @@ import type {
   SplitType,
 } from "@/lib/domain/types";
 
+import { muscleFrequencyPerWeek } from "./splits";
+
 /**
  * Weekly volume planning.
  *
@@ -289,23 +291,6 @@ export function planWeeklyVolume(input: VolumeInput): VolumePlan {
   };
 }
 
-/**
- * How many times a week each muscle is trained under a given split.
- *
- * Frequency matters because per-session volume has a ceiling: past roughly ten
- * hard sets for one muscle in one session, the later sets contribute little.
- * Spreading the same weekly volume over more sessions keeps every set useful.
- */
-export const SPLIT_FREQUENCY: Record<SplitType, (daysPerWeek: number) => number> = {
-  full_body: (days) => days,
-  upper_lower: (days) => Math.max(1, Math.floor(days / 2)),
-  push_pull_legs: (days) => Math.max(1, Math.floor(days / 3)),
-  push_pull: (days) => Math.max(1, Math.floor(days / 2)),
-  upper_lower_full: (days) => Math.max(1, Math.round((days * 2) / 3)),
-  body_part: () => 1,
-  hybrid_conditioning: (days) => Math.max(1, Math.floor(days / 2)),
-};
-
 /** Beyond this many sets for one muscle in one session, returns diminish sharply. */
 export const PER_SESSION_SET_CEILING = 10;
 
@@ -322,22 +307,38 @@ export type SessionVolumeTarget = {
 /**
  * Splits weekly targets into per-session targets for a given split.
  *
+ * Frequency is per muscle and comes from the split definition, because an
+ * upper/lower split does not train quads and chest equally often. It is also
+ * fractional, so a rolling three-day cycle on a four-day week correctly gives
+ * 1.33 sessions rather than 1.
+ *
  * Reports where the per-session ceiling bites rather than silently dropping the
- * excess: a weekly target that the chosen split cannot deliver is a reason to
- * change the split, and the caller should be able to see that.
+ * excess: a weekly target the chosen split cannot deliver is a reason to change
+ * the split, and the caller should be able to see that.
  */
 export function distributeAcrossSessions(
   weeklySets: Partial<Record<MuscleGroup, number>>,
   split: SplitType,
   daysPerWeek: number,
 ): SessionVolumeTarget[] {
-  const sessionsPerWeek = SPLIT_FREQUENCY[split](daysPerWeek);
-
   return (Object.entries(weeklySets) as [MuscleGroup, number][])
     .map(([muscle, weekly]) => {
+      const sessionsPerWeek = muscleFrequencyPerWeek(split, muscle, daysPerWeek);
+      if (sessionsPerWeek === 0) {
+        return {
+          muscle,
+          setsPerSession: 0,
+          sessionsPerWeek: 0,
+          effectiveWeeklySets: 0,
+          cappedByCeiling: false,
+        };
+      }
+
       const ideal = weekly / sessionsPerWeek;
       const setsPerSession = Math.min(Math.round(ideal), PER_SESSION_SET_CEILING);
-      const effectiveWeeklySets = setsPerSession * sessionsPerWeek;
+      // Rounded because a fractional frequency yields fractional weekly volume;
+      // the plan is an average over the rotation, not an exact weekly count.
+      const effectiveWeeklySets = Math.round(setsPerSession * sessionsPerWeek);
       return {
         muscle,
         setsPerSession,

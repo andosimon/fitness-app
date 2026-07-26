@@ -4,6 +4,8 @@
  * Run with: npm run volume
  */
 import { budgetSession } from "@/lib/engine/time-budget";
+import { planLiftSpecialisation } from "@/lib/engine/specialisation";
+import { isRollingSchedule } from "@/lib/engine/splits";
 import { distributeAcrossSessions, planWeeklyVolume } from "@/lib/engine/volume";
 import type { MuscleGroup, SplitType } from "@/lib/domain/types";
 
@@ -48,18 +50,33 @@ function show(label: string, priorityMuscles: MuscleGroup[] = []) {
 const base = show("Balanced");
 show("Squat specialisation (quads + glutes prioritised)", ["quads", "glutes"]);
 
-console.log("Same weekly volume under different splits (sets per session):\n");
+console.log("Same weekly volume under different splits (sets per session x frequency):\n");
 const splits: SplitType[] = ["full_body", "upper_lower", "push_pull_legs"];
-const watch: MuscleGroup[] = ["chest", "lats", "quads", "side_delts"];
+const watch: MuscleGroup[] = ["chest", "lats", "quads"];
 
-console.log("  split".padEnd(20) + watch.map((m) => m.padStart(12)).join("") + "   freq");
-console.log("  " + "-".repeat(18 + watch.length * 12 + 8));
+console.log("  split".padEnd(20) + watch.map((m) => m.padStart(16)).join("") + "   schedule");
+console.log("  " + "-".repeat(18 + watch.length * 16 + 14));
 for (const split of splits) {
   const dist = distributeAcrossSessions(base.weeklySets, split, DAYS);
   const cells = watch.map((m) => {
     const t = dist.find((d) => d.muscle === m);
-    return (t ? `${t.setsPerSession}` : "-").padStart(12);
+    if (!t) return "-".padStart(16);
+    const freq = Math.round(t.sessionsPerWeek * 100) / 100;
+    return `${t.setsPerSession} x ${freq}/wk`.padStart(16);
   });
-  const freq = dist[0]?.sessionsPerWeek ?? 0;
-  console.log("  " + split.padEnd(18) + cells.join("") + `   ${freq}x/wk`);
+  const rolling = isRollingSchedule(split, DAYS);
+  console.log("  " + split.padEnd(18) + cells.join("") + `   ${rolling ? "rolling" : "fixed"}`);
+}
+
+console.log("\nSquat specialisation, expressed differently per split:\n");
+for (const split of splits) {
+  const plan = planLiftSpecialisation({
+    pattern: "squat",
+    split,
+    daysPerWeek: DAYS,
+    weeklySetsForPattern: 14,
+  });
+  console.log(`  ${split}`);
+  console.log(`    ${plan.rationale}`);
+  console.log(`    techniques: ${plan.techniques.join(", ")}\n`);
 }
