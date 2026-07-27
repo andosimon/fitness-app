@@ -15,16 +15,22 @@ import { eq } from "drizzle-orm";
 import { FOUNDATIONAL_PATTERNS, type Equipment, type MovementPattern, type MuscleGroup, type SplitType } from "@/lib/domain/types";
 import { getDb } from "@/lib/db";
 import { equipmentProfiles, exercises } from "@/lib/db/schema";
+import { prescribeSession } from "@/lib/engine/prescription";
 import {
   chooseAnchorPatterns,
   selectSessionExercises,
   type SelectableExercise,
 } from "@/lib/engine/selection";
+import { planLiftSpecialisation } from "@/lib/engine/specialisation";
 import { buildRotation, isRollingSchedule } from "@/lib/engine/splits";
 import { budgetSession } from "@/lib/engine/time-budget";
 import { distributeAcrossSessions, planWeeklyVolume } from "@/lib/engine/volume";
 
 const SPLIT: SplitType = (process.argv[2] as SplitType) ?? "upper_lower";
+/** Optional: a pattern to specialise, e.g. `npm run program -- upper_lower squat`. */
+const SPECIALISE = process.argv[3] as MovementPattern | undefined;
+const WEEK = Number(process.argv[4] ?? 2);
+const BLOCK_LENGTH = 4;
 const DAYS = 4;
 const MINUTES = 45;
 const GOALS = { strength: 0.5, hypertrophy: 0.5 };
@@ -67,7 +73,8 @@ async function main() {
   const perSession = distributeAcrossSessions(plan.weeklySets, SPLIT, DAYS);
 
   console.log(
-    `${SPLIT} · ${DAYS} days · ${MINUTES} min · ${budget.totalSets} sets/session` +
+    `${SPLIT} · ${DAYS} days · ${MINUTES} min · week ${WEEK} of ${BLOCK_LENGTH}` +
+      `${SPECIALISE ? ` · specialising ${SPECIALISE}` : ""}` +
       `${isRollingSchedule(SPLIT, DAYS) ? " · rolling" : ""}\n`,
   );
 
@@ -115,13 +122,30 @@ async function main() {
       `Day ${index + 1} — ${label}  (${session.totalSets} sets, ${mins}:${secs} of ${MINUTES}:00)`,
     );
 
-    for (const item of session.exercises) {
-      const tag = item.role === "anchor" ? "ANCHOR" : item.supersetGroup ? `SS ${item.supersetGroup}` : "     ";
-      // Time- and distance-based work has no meaningful rep range.
-      const dose = ["time", "distance", "calories"].includes(item.exercise.loadType)
-        ? `${item.sets} x ${item.exercise.loadType}`
-        : `${item.sets} x ${item.exercise.defaultRepMin}-${item.exercise.defaultRepMax}`;
-      console.log(`   ${tag.padEnd(7)} ${item.exercise.name.padEnd(34)} ${dose}`);
+    const prescribed = prescribeSession({
+      selected: session,
+      goals: GOALS,
+      weekInBlock: WEEK,
+      blockLength: BLOCK_LENGTH,
+      specialisation: SPECIALISE
+        ? planLiftSpecialisation({
+            pattern: SPECIALISE,
+            split: SPLIT,
+            daysPerWeek: DAYS,
+            weeklySetsForPattern: 14,
+          })
+        : undefined,
+    });
+
+    for (const item of prescribed.exercises) {
+      const { selected: sel } = item;
+      const tag = sel.role === "anchor" ? "ANCHOR" : sel.supersetGroup ? `SS ${sel.supersetGroup}` : "     ";
+      console.log(`   ${tag.padEnd(7)} ${sel.exercise.name.padEnd(32)} ${item.summary}`);
+      for (const set of item.sets) {
+        if (set.tempo || set.note) {
+          console.log(`           ${" ".repeat(32)} set ${set.setNumber}: ${set.tempo ?? set.note}`);
+        }
+      }
     }
     if (session.shortfalls.length > 0) {
       console.log(
