@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 
 import type { Equipment, MuscleGroup } from "@/lib/domain/types";
 
 import {
+  estimateSessionSeconds,
   isPerformable,
   selectSessionExercises,
   type SelectableExercise,
@@ -51,7 +52,7 @@ const LIBRARY: SelectableExercise[] = [
   ex("leg-extension", { movementPattern: "isolation_lower", primaryMuscles: ["quads"], requiredEquipment: ["ankle_weights"], stimulusFatigueRatio: 5, substitutionGroup: "quad-iso" }),
   ex("sissy-squat", { movementPattern: "isolation_lower", primaryMuscles: ["quads"], stimulusFatigueRatio: 4, substitutionGroup: "quad-iso" }),
 
-  // Hamstring accessories — antagonists to the quad work.
+  // Hamstring accessories â€” antagonists to the quad work.
   ex("leg-curl", { movementPattern: "hinge", primaryMuscles: ["hamstrings"], requiredEquipment: ["ankle_weights"], stimulusFatigueRatio: 5, substitutionGroup: "ham-iso" }),
   ex("nordic-curl", { movementPattern: "hinge", primaryMuscles: ["hamstrings"], stimulusFatigueRatio: 3, substitutionGroup: "ham-iso" }),
 
@@ -76,7 +77,8 @@ function baseInput(overrides: Partial<SessionSelectionInput> = {}): SessionSelec
   return {
     day: LOWER_DAY,
     muscleTargets: { quads: 6, hamstrings: 6, glutes: 4, calves: 3, abs: 3 },
-    setBudget: 24,
+    // 45 minutes of lifting, the owner's actual session length.
+    secondsBudget: 45 * 60,
     anchorPatterns: ["squat", "hinge"],
     setsPerAnchor: 4,
     library: LIBRARY,
@@ -192,11 +194,45 @@ describe("determinism", () => {
 });
 
 describe("volume targeting", () => {
-  it("never exceeds the set budget", () => {
-    for (const setBudget of [6, 12, 18, 24, 30]) {
-      const result = selectSessionExercises(baseInput({ setBudget }));
-      expect(result.totalSets).toBeLessThanOrEqual(setBudget);
+  it("never exceeds the time available", () => {
+    for (const secondsBudget of [400, 900, 1500, 2100, 2700, 3600]) {
+      const result = selectSessionExercises(baseInput({ secondsBudget }));
+      expect(result.estimatedSeconds).toBeLessThanOrEqual(secondsBudget);
     }
+  });
+
+  it("costs heavy sets far more of the clock than isolation sets", () => {
+    /*
+     * The mismatch this budgeting replaced. Selection used to count sets while
+     * the time model counted seconds, so a session of heavy anchors and a
+     * session of isolation work looked equally expensive despite one taking
+     * half again as long. Three heavy sets carry ~3.5 minutes of rest each; three
+     * isolation sets carry about one.
+     */
+    const heavy = estimateSessionSeconds([
+      { exercise: LIBRARY[0], sets: 3, role: "anchor" },
+    ]);
+    const light = estimateSessionSeconds([
+      { exercise: LIBRARY[6], sets: 3, role: "accessory" },
+    ]);
+    // 1.8 rather than 2: the fixed per-exercise transition cost is the same for
+    // both and dilutes the ratio slightly.
+    expect(heavy).toBeGreaterThan(light * 1.8);
+  });
+
+  it("uses most of the time it is given", () => {
+    // Leaving a third of the session unspent is a planning failure, not
+    // prudence — the lifter is already in the gym.
+    const result = selectSessionExercises(baseInput());
+    expect(result.estimatedSeconds).toBeGreaterThan(45 * 60 * 0.7);
+  });
+
+  it("still fits an anchor when time is very short", () => {
+    // A two-set squat still anchors a session; no squat at all does not.
+    const result = selectSessionExercises(baseInput({ secondsBudget: 700 }));
+    const anchors = result.exercises.filter((e) => e.role === "anchor");
+    expect(anchors.length).toBeGreaterThanOrEqual(1);
+    expect(result.estimatedSeconds).toBeLessThanOrEqual(700);
   });
 
   it("credits secondary muscles at half", () => {
@@ -224,7 +260,7 @@ describe("volume targeting", () => {
 
   it("avoids two exercises from the same substitution group", () => {
     // Two near-identical movements in one session is redundancy, not volume.
-    const result = selectSessionExercises(baseInput({ setBudget: 40 }));
+    const result = selectSessionExercises(baseInput({ secondsBudget: 3000 }));
     const groups = result.exercises
       .map((e) => e.exercise.substitutionGroup)
       .filter((g): g is string => g !== null);
@@ -246,7 +282,7 @@ describe("volume targeting", () => {
   it("terminates when nothing can serve the remaining deficit", () => {
     // A target for a muscle no available exercise trains must not spin forever.
     const result = selectSessionExercises(
-      baseInput({ muscleTargets: { neck: 10 } as Partial<Record<MuscleGroup, number>>, setBudget: 30 }),
+      baseInput({ muscleTargets: { neck: 10 } as Partial<Record<MuscleGroup, number>>, secondsBudget: 2700 }),
     );
     expect(result.totalSets).toBeLessThanOrEqual(30);
   });
@@ -254,7 +290,7 @@ describe("volume targeting", () => {
 
 describe("antagonist supersets", () => {
   it("pairs accessories that do not share a muscle", () => {
-    const result = selectSessionExercises(baseInput({ setBudget: 30 }));
+    const result = selectSessionExercises(baseInput({ secondsBudget: 2700 }));
     const groups = new Map<string, typeof result.exercises>();
     for (const e of result.exercises) {
       if (!e.supersetGroup) continue;
@@ -276,7 +312,7 @@ describe("antagonist supersets", () => {
   it("never supersets an anchor", () => {
     // Pairing something off a heavy top set compromises the lift you are
     // actually trying to progress.
-    const result = selectSessionExercises(baseInput({ setBudget: 30 }));
+    const result = selectSessionExercises(baseInput({ secondsBudget: 2700 }));
     for (const e of result.exercises) {
       if (e.role === "anchor") expect(e.supersetGroup).toBeUndefined();
     }

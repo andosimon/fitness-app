@@ -96,7 +96,7 @@ async function main() {
     const session = selectSessionExercises({
       day,
       muscleTargets,
-      setBudget: budget.totalSets,
+      secondsBudget: MINUTES * 60,
       anchorPatterns,
       setsPerAnchor: Math.max(3, Math.round(budget.heavySets / Math.max(1, anchorPatterns.length))),
       library,
@@ -109,7 +109,11 @@ async function main() {
     });
 
     const label = `${day.label}${seenDayKeys.get(day.key)! > 1 || variant > 0 ? ` ${String.fromCharCode(65 + variant)}` : ""}`;
-    console.log(`Day ${index + 1} — ${label}  (${session.totalSets} sets)`);
+    const mins = Math.floor(session.estimatedSeconds / 60);
+    const secs = String(session.estimatedSeconds % 60).padStart(2, "0");
+    console.log(
+      `Day ${index + 1} — ${label}  (${session.totalSets} sets, ${mins}:${secs} of ${MINUTES}:00)`,
+    );
 
     for (const item of session.exercises) {
       const tag = item.role === "anchor" ? "ANCHOR" : item.supersetGroup ? `SS ${item.supersetGroup}` : "     ";

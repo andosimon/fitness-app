@@ -6,6 +6,7 @@ import type {
 } from "@/lib/domain/types";
 
 import type { SplitDay } from "./splits";
+import { blockSeconds, type Block, type SetKind } from "./time-budget";
 import { PER_SESSION_SET_CEILING } from "./volume";
 
 /**
@@ -65,11 +66,71 @@ export type SelectedExercise = {
 export type SelectedSession = {
   exercises: SelectedExercise[];
   totalSets: number;
+  /** Wall-clock seconds the selected work is expected to take. */
+  estimatedSeconds: number;
   /** Sets delivered per muscle, for checking the plan against its targets. */
   deliveredSets: Partial<Record<MuscleGroup, number>>;
   /** Targets that could not be met with the available equipment and time. */
   shortfalls: { muscle: MuscleGroup; target: number; delivered: number }[];
 };
+
+/** Roles map onto the time model's cost categories. */
+const ROLE_SET_KIND: Record<ExerciseRole, SetKind> = {
+  anchor: "heavy_compound",
+  secondary: "moderate_compound",
+  accessory: "isolation",
+};
+
+/**
+ * Wall-clock cost of a set of selections, accounting for supersets.
+ *
+ * Selection previously budgeted in *sets*, while the time budgeter worked in
+ * seconds and distinguished heavy work from light. Those two disagree badly: a
+ * lower day with two heavy anchors costs far more time than its set count
+ * suggests, because a heavy set carries three and a half minutes of rest and an
+ * isolation set carries one. Costing the actual selections keeps the session
+ * honest about the clock.
+ */
+export function estimateSessionSeconds(chosen: SelectedExercise[]): number {
+  const grouped = new Map<string, SelectedExercise[]>();
+  const solo: SelectedExercise[] = [];
+
+  for (const item of chosen) {
+    if (item.supersetGroup) {
+      grouped.set(item.supersetGroup, [...(grouped.get(item.supersetGroup) ?? []), item]);
+    } else {
+      solo.push(item);
+    }
+  }
+
+  const blocks: Block[] = solo.map((item) => ({
+    kind: "straight",
+    setKind: ROLE_SET_KIND[item.role],
+    sets: item.sets,
+  }));
+
+  for (const [, members] of grouped) {
+    if (members.length === 2) {
+      blocks.push({
+        kind: "superset",
+        setKinds: [ROLE_SET_KIND[members[0].role], ROLE_SET_KIND[members[1].role]],
+        // Rounds are limited by the shorter side; any remainder is a straight set.
+        rounds: Math.min(members[0].sets, members[1].sets),
+      });
+      const remainder = Math.abs(members[0].sets - members[1].sets);
+      if (remainder > 0) {
+        const longer = members[0].sets > members[1].sets ? members[0] : members[1];
+        blocks.push({ kind: "straight", setKind: ROLE_SET_KIND[longer.role], sets: remainder });
+      }
+    } else {
+      for (const item of members) {
+        blocks.push({ kind: "straight", setKind: ROLE_SET_KIND[item.role], sets: item.sets });
+      }
+    }
+  }
+
+  return blocks.reduce((sum, block) => sum + blockSeconds(block), 0);
+}
 
 export type SelectionContext = {
   availableEquipment: Equipment[];
@@ -269,8 +330,14 @@ export type SessionSelectionInput = {
   day: SplitDay;
   /** Sets to deliver per muscle in this session. */
   muscleTargets: Partial<Record<MuscleGroup, number>>;
-  /** Total working sets the session's time budget allows. */
-  setBudget: number;
+  /**
+   * Wall-clock seconds available for working sets, excluding warm-up.
+   *
+   * Budgeting in seconds rather than sets is what keeps selection and the time
+   * model in agreement: three heavy anchor sets cost roughly as much of the
+   * clock as nine isolation sets, so a set count cannot govern both.
+   */
+  secondsBudget: number;
   /** Patterns to anchor, most important first. */
   anchorPatterns: MovementPattern[];
   /** Sets for each anchor. */
@@ -280,7 +347,8 @@ export type SessionSelectionInput = {
 };
 
 export function selectSessionExercises(input: SessionSelectionInput): SelectedSession {
-  const { day, muscleTargets, setBudget, anchorPatterns, setsPerAnchor, library, context } = input;
+  const { day, muscleTargets, secondsBudget, anchorPatterns, setsPerAnchor, library, context } =
+    input;
 
   const excluded = new Set(context.excludedExerciseIds ?? []);
   const performable = library.filter(
@@ -303,12 +371,45 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
     }
   };
 
-  let remaining = setBudget;
+  const uncredit = (exercise: SelectableExercise, sets: number) => {
+    for (const muscle of exercise.primaryMuscles) {
+      delivered[muscle] = (delivered[muscle] ?? 0) - sets;
+    }
+    for (const muscle of exercise.secondaryMuscles) {
+      delivered[muscle] = (delivered[muscle] ?? 0) - sets * 0.5;
+    }
+  };
+
+  /**
+   * Adds a selection only if the session still fits the clock afterwards.
+   *
+   * Supersets are re-formed and the whole session re-costed on every attempt,
+   * because pairing changes the total: two accessories run as a superset cost
+   * meaningfully less than the same two run straight. Measuring the real
+   * arrangement and reverting when it overruns is simpler to reason about than
+   * predicting the pairing in advance, and it can never exceed budget.
+   */
+  const tryAdd = (candidate: SelectedExercise): boolean => {
+    chosen.push(candidate);
+    credit(candidate.exercise, candidate.sets);
+    pairAntagonists(chosen);
+
+    if (estimateSessionSeconds(chosen) > secondsBudget) {
+      chosen.pop();
+      uncredit(candidate.exercise, candidate.sets);
+      pairAntagonists(chosen);
+      return false;
+    }
+
+    usedIds.add(candidate.exercise.id);
+    if (candidate.exercise.substitutionGroup) {
+      usedGroups.add(candidate.exercise.substitutionGroup);
+    }
+    return true;
+  };
 
   // --- Anchors -------------------------------------------------------------
   for (const pattern of anchorPatterns) {
-    if (remaining < setsPerAnchor) break;
-
     const candidates = performable
       .filter((e) => e.movementPattern === pattern && !usedIds.has(e.id))
       .sort((a, b) => anchorScore(b) - anchorScore(a));
@@ -332,11 +433,12 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
     const key = `${context.seed ?? ""}|anchor|${pattern}|${context.blockIndex}|${context.dayVariantIndex}`;
     const picked = pickDeterministic(shortlist, key)!;
 
-    chosen.push({ exercise: picked, sets: setsPerAnchor, role: "anchor" });
-    usedIds.add(picked.id);
-    if (picked.substitutionGroup) usedGroups.add(picked.substitutionGroup);
-    credit(picked, setsPerAnchor);
-    remaining -= setsPerAnchor;
+    // Anchors are the priority, so if the full prescription will not fit, try
+    // progressively fewer sets before abandoning the pattern entirely. A
+    // two-set squat still anchors a session; no squat at all does not.
+    for (let sets = setsPerAnchor; sets >= 2; sets--) {
+      if (tryAdd({ exercise: picked, sets, role: "anchor" })) break;
+    }
   }
 
   // --- Accessories ---------------------------------------------------------
@@ -350,17 +452,21 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
    * Weekly volume is shared across all muscles, but a split does not divide it
    * evenly between day types: an upper day covers ten muscles and a lower day
    * covers fewer with smaller targets. Serving only the stated targets left
-   * lower sessions using 13 of 25 available sets — half the session unspent
-   * while the lifter is standing in the gym with time on the clock.
+   * lower sessions using half their available time while the lifter is standing
+   * in the gym with clock to spare.
    *
-   * So once every target is met, remaining budget tops muscles up toward a
-   * ceiling rather than being discarded.
+   * So once every target is met, remaining time tops muscles up toward a ceiling
+   * rather than being discarded.
    */
   const TOP_UP_MULTIPLIER = 1.6;
 
   let allowOverfill = false;
 
-  while (remaining >= 2) {
+  // Bounded to keep the loop obviously terminating; each pass adds at most one
+  // exercise, and no session has anywhere near this many.
+  let guard = 0;
+
+  while (guard++ < 60) {
     const ceilingFor = (target: number) =>
       allowOverfill
         ? Math.min(target * TOP_UP_MULTIPLIER, PER_SESSION_SET_CEILING)
@@ -410,13 +516,16 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
       // Match the prescription to what is actually owed. Always assigning three
       // sets overshoots small deficits, which is how forearms end up with a
       // full slot while chest is still short.
-      const sets = Math.min(deficit >= 3 ? 3 : 2, remaining);
+      const sets = deficit >= 3 ? 3 : 2;
 
-      chosen.push({ exercise: picked, sets, role: "accessory" });
-      usedIds.add(picked.id);
-      if (picked.substitutionGroup) usedGroups.add(picked.substitutionGroup);
-      credit(picked, sets);
-      remaining -= sets;
+      if (!tryAdd({ exercise: picked, sets, role: "accessory" })) {
+        // Would overrun the clock. A smaller dose may still fit.
+        if (sets > 2 && tryAdd({ exercise: picked, sets: 2, role: "accessory" })) {
+          progressed = true;
+          break;
+        }
+        continue;
+      }
       progressed = true;
       break;
     }
@@ -430,6 +539,42 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
       }
       break;
     }
+  }
+
+  /**
+   * Final pass: deepen what is already selected rather than end early.
+   *
+   * Lower days run out of distinct accessories long before they run out of
+   * clock — there are simply fewer non-overlapping lower-body movements, and one
+   * exercise per substitution group rules out near-duplicates. Adding a fourth
+   * set to work already prescribed is what a coach would do, and is better than
+   * handing back thirteen unused minutes.
+   */
+  const MAX_ACCESSORY_SETS = 5;
+  let deepenGuard = 0;
+
+  while (deepenGuard++ < 40) {
+    const candidates = chosen
+      .filter((e) => e.role === "accessory" && e.sets < MAX_ACCESSORY_SETS)
+      .sort((a, b) => a.sets - b.sets);
+    if (candidates.length === 0) break;
+
+    let added = false;
+    for (const item of candidates) {
+      item.sets += 1;
+      credit(item.exercise, 1);
+      pairAntagonists(chosen);
+
+      if (estimateSessionSeconds(chosen) > secondsBudget) {
+        item.sets -= 1;
+        uncredit(item.exercise, 1);
+        pairAntagonists(chosen);
+        continue;
+      }
+      added = true;
+      break;
+    }
+    if (!added) break;
   }
 
   pairAntagonists(chosen);
@@ -446,6 +591,7 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
   return {
     exercises: chosen,
     totalSets: chosen.reduce((sum, e) => sum + e.sets, 0),
+    estimatedSeconds: estimateSessionSeconds(chosen),
     deliveredSets: delivered,
     shortfalls,
   };
@@ -459,6 +605,10 @@ export function selectSessionExercises(input: SessionSelectionInput): SelectedSe
  * are trying to progress.
  */
 function pairAntagonists(chosen: SelectedExercise[]): void {
+  // Re-runnable: this is called after every trial addition, so prior groupings
+  // must be cleared or stale pairs would survive a reverted candidate.
+  for (const item of chosen) delete item.supersetGroup;
+
   const accessories = chosen.filter((e) => e.role === "accessory");
   const paired = new Set<string>();
   let group = 0;
