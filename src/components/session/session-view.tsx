@@ -2,7 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { getLocalDb, isLocalDbAvailable, type CachedExercise, type LocalSetLog } from "@/lib/offline/db";
 import {
@@ -161,10 +161,78 @@ function RecentSessions() {
   );
 }
 
-export function SessionView({ exercises: serverExercises }: { exercises: CachedExercise[] }) {
+/** The prescription for one exercise, as planned. */
+export type PlannedRow = {
+  id: string;
+  exerciseId: string;
+  exerciseName: string;
+  sets: number;
+  repMin: number | null;
+  repMax: number | null;
+  targetRir: number | null;
+  targetRpe: number | null;
+  targetPercent1rm: number | null;
+  supersetGroup: string | null;
+  tempo: string | null;
+  notes: string | null;
+};
+
+export type PlannedSessionProp = {
+  id: string;
+  name: string;
+  weekNumber: number;
+  isDeload: boolean;
+  targetMinutes: number;
+  programId: string;
+  programName: string;
+  notes: string | null;
+  exercises: PlannedRow[];
+} | null;
+
+/** Renders a prescription the way a coach would write it. */
+function describePrescription(row: PlannedRow): string {
+  const reps =
+    row.repMin === null
+      ? ""
+      : row.repMin === row.repMax
+        ? `${row.repMin}`
+        : `${row.repMin}-${row.repMax}`;
+  const cue =
+    row.targetRpe !== null
+      ? ` @ RPE ${row.targetRpe}${row.targetPercent1rm ? ` (~${Math.round(row.targetPercent1rm)}%)` : ""}`
+      : row.targetRir !== null
+        ? ` @ RIR ${row.targetRir}`
+        : "";
+  return `${row.sets} × ${reps}${cue}`;
+}
+
+export function SessionView({
+  exercises: serverExercises,
+  planned,
+}: {
+  exercises: CachedExercise[];
+  planned: PlannedSessionProp;
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
   const [activeExerciseIds, setActiveExerciseIds] = useState<string[]>([]);
+
+  /**
+   * Whether this browser has IndexedDB.
+   *
+   * The server snapshot is `true` deliberately. There is no `indexedDB` during
+   * server rendering, and treating that as "unsupported" made the initial HTML
+   * an error message — which the service worker could then cache. Assuming
+   * support on the server lets the planned session, which is server data,
+   * render immediately; a genuinely unsupported browser corrects itself on
+   * hydration. `useSyncExternalStore` is the supported way to hold a
+   * client-only value without writing state from an effect.
+   */
+  const hasLocalDb = useSyncExternalStore(
+    () => () => {},
+    () => isLocalDbAvailable(),
+    () => true,
+  );
 
   // Refresh the offline mirror on every load while a connection exists. This is
   // an effect updating an external system, which is what effects are for.
@@ -215,10 +283,29 @@ export function SessionView({ exercises: serverExercises }: { exercises: CachedE
 
   const liveSets = useMemo(() => sets.filter((s) => s.deleted === 0), [sets]);
 
-  /** Exercises in the session, ordered by when each first appeared. */
+  /**
+   * Exercises in the session.
+   *
+   * When following a plan, the order comes from the plan itself rather than
+   * component state, so it survives a reload mid-session — losing your place
+   * because the screen locked would be unforgivable in a gym.
+   */
+  const followingPlan =
+    planned !== null && session?.plannedSessionId === planned.id ? planned : null;
+
   const grouped = useMemo(() => {
     const order: string[] = [];
     const map = new Map<string, LocalSetLog[]>();
+
+    if (followingPlan) {
+      for (const row of followingPlan.exercises) {
+        if (!map.has(row.exerciseId)) {
+          map.set(row.exerciseId, []);
+          order.push(row.exerciseId);
+        }
+      }
+    }
+
     for (const s of [...liveSets].sort((a, b) => a.completedAt.localeCompare(b.completedAt))) {
       if (!map.has(s.exerciseId)) {
         map.set(s.exerciseId, []);
@@ -233,14 +320,18 @@ export function SessionView({ exercises: serverExercises }: { exercises: CachedE
       }
     }
     return order.map((id) => ({ exerciseId: id, sets: map.get(id) ?? [] }));
-  }, [liveSets, activeExerciseIds]);
+  }, [liveSets, activeExerciseIds, followingPlan]);
 
-  // undefined means the first local read has not resolved yet.
-  if (sessionQuery === undefined && isLocalDbAvailable()) {
-    return <p className="mt-8 text-sm text-muted">Loading…</p>;
-  }
+  /** First prescription row per exercise, for showing the target. */
+  const prescriptionByExercise = useMemo(() => {
+    const map = new Map<string, PlannedRow>();
+    for (const row of followingPlan?.exercises ?? []) {
+      if (!map.has(row.exerciseId)) map.set(row.exerciseId, row);
+    }
+    return map;
+  }, [followingPlan]);
 
-  if (!isLocalDbAvailable()) {
+  if (!hasLocalDb) {
     return (
       <p className="mt-8 rounded-xl border border-border bg-surface p-4 text-sm text-muted">
         This browser has no IndexedDB support, so offline logging is unavailable.
@@ -249,24 +340,91 @@ export function SessionView({ exercises: serverExercises }: { exercises: CachedE
   }
 
   if (!session) {
+    const adHocName = new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      day: "numeric",
+      month: "short",
+    });
+
     return (
-      <div className="mt-8">
-        <p className="text-sm text-muted">No session in progress.</p>
+      <div className="mt-6">
+        {planned ? (
+          <section className="rounded-2xl border border-border bg-surface p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <h1 className="text-lg font-semibold tracking-tight">{planned.name}</h1>
+              <span className="shrink-0 font-mono text-xs text-muted">
+                wk {planned.weekNumber}
+                {planned.isDeload ? " · deload" : ""}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-muted">
+              {planned.programName} · about {planned.targetMinutes} min
+            </p>
+
+            {planned.notes ? (
+              <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">
+                {planned.notes}
+              </p>
+            ) : null}
+
+            <ol className="mt-3 flex flex-col gap-1">
+              {planned.exercises.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex items-baseline justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0">
+                    {row.exerciseName}
+                    {row.supersetGroup ? (
+                      <span className="ml-1.5 text-xs text-accent">superset</span>
+                    ) : null}
+                    {row.tempo ? (
+                      <span className="mt-0.5 block text-xs text-muted">{row.tempo}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs text-muted">
+                    {describePrescription(row)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+
+            <button
+              type="button"
+              onClick={() =>
+                void startSession({
+                  name: planned.name,
+                  plannedSessionId: planned.id,
+                  programId: planned.programId,
+                })
+              }
+              className="mt-4 w-full rounded-xl bg-accent px-4 py-3.5 text-base font-semibold text-accent-fg transition-colors hover:bg-accent-hover"
+            >
+              Start this session
+            </button>
+          </section>
+        ) : (
+          <>
+            <p className="text-sm text-muted">
+              No programme yet. Generate one and your next session appears here.
+            </p>
+            <Link
+              href="/program/new"
+              className="mt-4 block rounded-xl bg-accent px-4 py-3.5 text-center text-base font-semibold text-accent-fg transition-colors hover:bg-accent-hover"
+            >
+              Create a programme
+            </Link>
+          </>
+        )}
+
         <button
           type="button"
-          onClick={() =>
-            void startSession({
-              name: new Date().toLocaleDateString(undefined, {
-                weekday: "long",
-                day: "numeric",
-                month: "short",
-              }),
-            })
-          }
-          className="mt-4 w-full rounded-xl bg-accent px-4 py-3.5 text-base font-semibold text-accent-fg transition-colors hover:bg-accent-hover"
+          onClick={() => void startSession({ name: adHocName })}
+          className="mt-3 w-full rounded-xl border border-border px-4 py-3 text-sm text-muted transition-colors hover:text-text"
         >
-          Start a session
+          Log something else instead
         </button>
+
         <div className="mt-2">
           <SyncStatus />
         </div>
@@ -302,6 +460,7 @@ export function SessionView({ exercises: serverExercises }: { exercises: CachedE
             exercise={exercise}
             sets={exerciseSets}
             sessionId={session.id}
+            prescription={prescriptionByExercise.get(exerciseId) ?? null}
             onLogged={() => setRestStartedAt(Date.now())}
           />
         );
@@ -357,22 +516,41 @@ function ExerciseBlock({
   exercise,
   sets,
   sessionId,
+  prescription,
   onLogged,
 }: {
   exercise: CachedExercise;
   sets: LocalSetLog[];
   sessionId: string;
+  prescription: PlannedRow | null;
   onLogged: () => void;
 }) {
   const fields = fieldsFor(exercise.loadType);
   const last = sets[sets.length - 1];
+  const done = sets.length;
+  const planned = prescription?.sets ?? null;
 
   return (
     <section className="rounded-2xl border border-border bg-surface p-4">
-      <h2 className="font-medium">{exercise.name}</h2>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-medium">{exercise.name}</h2>
+        {planned !== null ? (
+          <span
+            className={`shrink-0 font-mono text-xs ${done >= planned ? "text-success" : "text-muted"}`}
+          >
+            {done}/{planned}
+          </span>
+        ) : null}
+      </div>
       <p className="mt-0.5 text-xs text-muted">
-        target {exercise.defaultRepMin}–{exercise.defaultRepMax} reps
+        {prescription
+          ? describePrescription(prescription)
+          : `target ${exercise.defaultRepMin}–${exercise.defaultRepMax} reps`}
+        {prescription?.tempo ? ` · ${prescription.tempo}` : ""}
       </p>
+      {prescription?.notes ? (
+        <p className="mt-1 text-xs text-accent">{prescription.notes}</p>
+      ) : null}
 
       {sets.length > 0 ? (
         <ol className="mt-3 flex flex-col gap-1">

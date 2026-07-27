@@ -24,6 +24,12 @@ export async function startSession(input: {
   name: string;
   sessionType?: LocalSession["sessionType"];
   equipmentProfileId?: string | null;
+  /**
+   * Links this session to a planned one. The link is what marks the plan as
+   * done and lets the logger show what was prescribed alongside what was lifted.
+   */
+  plannedSessionId?: string | null;
+  programId?: string | null;
 }): Promise<string> {
   const db = getLocalDb();
   const now = new Date().toISOString();
@@ -39,8 +45,8 @@ export async function startSession(input: {
     equipmentProfileId: input.equipmentProfileId ?? null,
     locationNote: null,
     notes: null,
-    programId: null,
-    plannedSessionId: null,
+    programId: input.programId ?? null,
+    plannedSessionId: input.plannedSessionId ?? null,
     dirty: 1,
     deleted: 0,
     updatedAt: now,
