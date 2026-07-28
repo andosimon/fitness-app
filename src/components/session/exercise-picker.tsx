@@ -18,21 +18,45 @@ function humanise(value: string): string {
 export function ExercisePicker({
   exercises,
   recentIds,
+  availableEquipment,
+  equipmentProfileName,
   onSelect,
   onClose,
 }: {
   exercises: CachedExercise[];
   /** Exercises already used this session, surfaced first for quick re-entry. */
   recentIds: string[];
+  /** Equipment on hand. Filters the list unless explicitly overridden. */
+  availableEquipment: string[];
+  equipmentProfileName: string | null;
   onSelect: (exercise: CachedExercise) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  /**
+   * Filtered by default.
+   *
+   * Showing all 211 exercises when only 175 are performable led to logging a
+   * machine leg curl against a set done with ankle weights. That is not just
+   * untidy: the engine reads this history to suggest loads, so attributing work
+   * to equipment that isn't there corrupts the input. The override exists
+   * because training elsewhere is a normal thing to do.
+   */
+  const [showAll, setShowAll] = useState(false);
+
+  const performable = useMemo(() => {
+    if (showAll || availableEquipment.length === 0) return exercises;
+    return exercises.filter((ex) =>
+      ex.requiredEquipment.every((item) => availableEquipment.includes(item)),
+    );
+  }, [exercises, availableEquipment, showAll]);
+
+  const hiddenCount = exercises.length - performable.length;
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
 
-    const matches = exercises.filter((ex) => {
+    const matches = performable.filter((ex) => {
       if (!needle) return true;
       return (
         ex.name.toLowerCase().includes(needle) ||
@@ -52,7 +76,7 @@ export function ExercisePicker({
       ];
     }
     return matches;
-  }, [exercises, query, recentIds]);
+  }, [performable, query, recentIds]);
 
   const recent = new Set(recentIds);
 
@@ -76,6 +100,23 @@ export function ExercisePicker({
           Cancel
         </button>
       </div>
+
+      {hiddenCount > 0 || showAll ? (
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs">
+          <span className="text-muted">
+            {showAll
+              ? "Showing every exercise, including ones you have no kit for."
+              : `${equipmentProfileName ?? "Your equipment"} · ${hiddenCount} hidden`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-muted transition-colors hover:text-text"
+          >
+            {showAll ? "Filter to my kit" : "Show all"}
+          </button>
+        </div>
+      ) : null}
 
       <ul className="flex-1 overflow-y-auto p-3">
         {results.map((ex) => (

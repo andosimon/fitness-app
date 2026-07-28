@@ -290,8 +290,23 @@ export async function getNextPlannedSession(): Promise<PlannedSessionView | null
   return unsafe_getNextPlannedSession();
 }
 
-/** See the note on `unsafe_createProgram`. */
-export async function unsafe_getNextPlannedSession(): Promise<PlannedSessionView | null> {
+export type UpcomingSession = {
+  id: string;
+  name: string;
+  weekNumber: number;
+  dayIndex: number;
+  isDeload: boolean;
+};
+
+/**
+ * Unperformed sessions, in plan order.
+ *
+ * Offered so the lifter can pick which one they are doing rather than being
+ * forced down a queue. Real training does not follow a rigid sequence — you
+ * train what you are set up for, and turning up wanting to squat should not
+ * mean logging ad-hoc because the plan said upper body.
+ */
+export async function unsafe_listUpcomingSessions(limit = 8): Promise<UpcomingSession[]> {
   const db = getDb();
 
   const [program] = await db
@@ -300,7 +315,47 @@ export async function unsafe_getNextPlannedSession(): Promise<PlannedSessionView
     .where(eq(programs.status, "active"))
     .orderBy(desc(programs.createdAt))
     .limit(1);
-  if (!program) return null;
+  if (!program) return [];
+
+  return db
+    .select({
+      id: plannedSessions.id,
+      name: plannedSessions.name,
+      weekNumber: programWeeks.weekNumber,
+      dayIndex: plannedSessions.dayIndex,
+      isDeload: programWeeks.isDeload,
+    })
+    .from(plannedSessions)
+    .innerJoin(programWeeks, eq(programWeeks.id, plannedSessions.programWeekId))
+    .leftJoin(sessions, eq(sessions.plannedSessionId, plannedSessions.id))
+    .where(and(eq(programWeeks.programId, program.id), isNull(sessions.id)))
+    .orderBy(asc(programWeeks.weekNumber), asc(plannedSessions.dayIndex))
+    .limit(limit);
+}
+
+export async function listUpcomingSessions(limit = 8): Promise<UpcomingSession[]> {
+  await requireAuth();
+  return unsafe_listUpcomingSessions(limit);
+}
+
+/** A specific planned session, for when the lifter has chosen one. */
+export async function getPlannedSessionById(
+  plannedSessionId: string,
+): Promise<PlannedSessionView | null> {
+  await requireAuth();
+  return buildPlannedSessionView(plannedSessionId);
+}
+
+/** See the note on `unsafe_createProgram`. */
+export async function unsafe_getNextPlannedSession(): Promise<PlannedSessionView | null> {
+  const [next] = await unsafe_listUpcomingSessions(1);
+  return next ? buildPlannedSessionView(next.id) : null;
+}
+
+async function buildPlannedSessionView(
+  plannedSessionId: string,
+): Promise<PlannedSessionView | null> {
+  const db = getDb();
 
   const [next] = await db
     .select({
@@ -312,12 +367,13 @@ export async function unsafe_getNextPlannedSession(): Promise<PlannedSessionView
       notes: plannedSessions.notes,
       weekNumber: programWeeks.weekNumber,
       isDeload: programWeeks.isDeload,
+      programId: programs.id,
+      programName: programs.name,
     })
     .from(plannedSessions)
     .innerJoin(programWeeks, eq(programWeeks.id, plannedSessions.programWeekId))
-    .leftJoin(sessions, eq(sessions.plannedSessionId, plannedSessions.id))
-    .where(and(eq(programWeeks.programId, program.id), isNull(sessions.id)))
-    .orderBy(asc(programWeeks.weekNumber), asc(plannedSessions.dayIndex))
+    .innerJoin(programs, eq(programs.id, programWeeks.programId))
+    .where(eq(plannedSessions.id, plannedSessionId))
     .limit(1);
 
   if (!next) return null;
@@ -345,13 +401,8 @@ export async function unsafe_getNextPlannedSession(): Promise<PlannedSessionView
     .where(eq(plannedExercises.plannedSessionId, next.id))
     .orderBy(asc(plannedExercises.orderIndex));
 
-  return {
-    ...next,
-    programId: program.id,
-    programName: program.name,
-    completed: false,
-    exercises: exerciseRows,
-  };
+  // programId and programName already come from the join above.
+  return { ...next, completed: false, exercises: exerciseRows };
 }
 
 export async function archiveActiveProgram(): Promise<void> {

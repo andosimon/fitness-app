@@ -206,12 +206,26 @@ function describePrescription(row: PlannedRow): string {
   return `${row.sets} × ${reps}${cue}`;
 }
 
+export type UpcomingSessionProp = {
+  id: string;
+  name: string;
+  weekNumber: number;
+  dayIndex: number;
+  isDeload: boolean;
+};
+
 export function SessionView({
   exercises: serverExercises,
   planned,
+  upcoming,
+  availableEquipment,
+  equipmentProfileName,
 }: {
   exercises: CachedExercise[];
   planned: PlannedSessionProp;
+  upcoming: UpcomingSessionProp[];
+  availableEquipment: string[];
+  equipmentProfileName: string | null;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
@@ -346,6 +360,9 @@ export function SessionView({
       month: "short",
     });
 
+    // Alternatives to whichever session is currently shown.
+    const otherSessions = upcoming.filter((s) => s.id !== planned?.id).slice(0, 5);
+
     return (
       <div className="mt-6">
         {planned ? (
@@ -402,6 +419,29 @@ export function SessionView({
             >
               Start this session
             </button>
+
+            {/*
+              The plan is a queue, not a calendar. Training what you are set up
+              for is normal, and forcing strict sequence order meant a legs day
+              got logged ad-hoc because the queue said upper body.
+            */}
+            {otherSessions.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="text-xs text-muted">Doing a different one today?</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {otherSessions.map((s) => (
+                    <Link
+                      key={s.id}
+                      href={`/?session=${s.id}`}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-text"
+                    >
+                      {s.name}
+                      <span className="ml-1 font-mono opacity-60">wk{s.weekNumber}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : (
           <>
@@ -501,6 +541,8 @@ export function SessionView({
         <ExercisePicker
           exercises={library}
           recentIds={grouped.map((g) => g.exerciseId)}
+          availableEquipment={availableEquipment}
+          equipmentProfileName={equipmentProfileName}
           onSelect={(ex) => {
             setActiveExerciseIds((prev) => (prev.includes(ex.id) ? prev : [...prev, ex.id]));
             setPickerOpen(false);

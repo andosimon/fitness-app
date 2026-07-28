@@ -7,9 +7,24 @@ export const metadata = {
   title: "History · Fitness Tracker",
 };
 
-function formatDuration(startedAt: Date, completedAt: Date | null): string | null {
+/**
+ * Session duration, or null when it plainly wasn't measured.
+ *
+ * A session entered after the fact spans only the time spent typing, so a
+ * 21-set workout can report four minutes. Reporting that as duration is worse
+ * than reporting nothing, so anything under about forty seconds per set is
+ * treated as backfilled.
+ */
+function formatDuration(
+  startedAt: Date,
+  completedAt: Date | null,
+  setCount: number,
+): string | null {
   if (!completedAt) return null;
-  const minutes = Math.round((completedAt.getTime() - startedAt.getTime()) / 60000);
+  const seconds = (completedAt.getTime() - startedAt.getTime()) / 1000;
+  if (setCount > 0 && seconds / setCount < 40) return null;
+
+  const minutes = Math.round(seconds / 60);
   if (minutes < 1) return "under a minute";
   if (minutes < 60) return `${minutes} min`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
@@ -39,7 +54,7 @@ export default async function HistoryPage() {
         ) : (
           <ul className="mt-4 flex flex-col gap-2">
             {sessions.map((s) => {
-              const duration = formatDuration(s.startedAt, s.completedAt);
+              const duration = formatDuration(s.startedAt, s.completedAt, s.setCount);
               return (
                 <li key={s.id}>
                   <Link
