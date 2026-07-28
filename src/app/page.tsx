@@ -1,6 +1,7 @@
 import { AppNav } from "@/components/app-nav";
 import { SessionView, type PlannedSessionProp } from "@/components/session/session-view";
 import { listEquipmentProfiles, listExercises } from "@/lib/db/queries/exercises";
+import { getRecentFatigue, suggestLoadsForSession } from "@/lib/db/queries/progression";
 import {
   getNextPlannedSession,
   getPlannedSessionById,
@@ -38,6 +39,28 @@ export default async function TodayPage(props: {
 
   const defaultProfile = profiles.find((p) => p.isDefault) ?? profiles[0];
 
+  // Load suggestions come from logged history, so they only exist once there is
+  // some. A first-time exercise says so rather than inventing a number.
+  const [suggestions, fatigue] = await Promise.all([
+    planned
+      ? suggestLoadsForSession(
+          planned.exercises.map((row) => ({
+            plannedExerciseId: row.id,
+            exerciseId: row.exerciseId,
+            loadType: row.loadType,
+            repMin: row.repMin,
+            repMax: row.repMax,
+            targetRir: row.targetRir,
+            targetRpe: row.targetRpe,
+            targetPercent1rm: row.targetPercent1rm,
+          })),
+        )
+      : Promise.resolve([]),
+    getRecentFatigue(planned?.exercises[0]?.targetRir ?? 2),
+  ]);
+
+  const byPlannedExercise = new Map(suggestions.map((s) => [s.plannedExerciseId, s]));
+
   const plannedProp: PlannedSessionProp = planned
     ? {
         id: planned.id,
@@ -48,20 +71,26 @@ export default async function TodayPage(props: {
         programId: planned.programId,
         programName: planned.programName,
         notes: planned.notes,
-        exercises: planned.exercises.map((row) => ({
-          id: row.id,
-          exerciseId: row.exerciseId,
-          exerciseName: row.exerciseName,
-          sets: row.sets,
-          repMin: row.repMin,
-          repMax: row.repMax,
-          targetRir: row.targetRir,
-          targetRpe: row.targetRpe,
-          targetPercent1rm: row.targetPercent1rm,
-          supersetGroup: row.supersetGroup,
-          tempo: row.tempo,
-          notes: row.notes,
-        })),
+        exercises: planned.exercises.map((row) => {
+          const suggestion = byPlannedExercise.get(row.id);
+          return {
+            id: row.id,
+            exerciseId: row.exerciseId,
+            exerciseName: row.exerciseName,
+            sets: row.sets,
+            repMin: row.repMin,
+            repMax: row.repMax,
+            targetRir: row.targetRir,
+            targetRpe: row.targetRpe,
+            targetPercent1rm: row.targetPercent1rm,
+            supersetGroup: row.supersetGroup,
+            tempo: row.tempo,
+            notes: row.notes,
+            suggestedLoadKg: suggestion?.loadKg ?? null,
+            suggestionReason: suggestion?.reason ?? null,
+            estimatedOneRepMax: suggestion?.estimatedOneRepMax ?? null,
+          };
+        }),
       }
     : null;
 
@@ -75,6 +104,7 @@ export default async function TodayPage(props: {
           upcoming={upcoming}
           availableEquipment={(defaultProfile?.equipment ?? []) as Equipment[]}
           equipmentProfileName={defaultProfile?.name ?? null}
+          fatigue={fatigue.setsExamined >= 4 ? { status: fatigue.status, note: fatigue.note } : null}
         />
       </main>
     </>

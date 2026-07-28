@@ -18,7 +18,9 @@
     "budget": "tsx scripts/preview-budget.ts",
     "volume": "tsx scripts/preview-volume.ts",
     "program": "tsx scripts/preview-program.ts",
-    "generate": "tsx scripts/generate-program.ts"
+    "generate": "tsx scripts/generate-program.ts",
+    "progress": "tsx scripts/preview-progression.ts",
+    "suggest": "tsx scripts/preview-suggestions.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

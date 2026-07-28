@@ -175,6 +175,10 @@ export type PlannedRow = {
   supersetGroup: string | null;
   tempo: string | null;
   notes: string | null;
+  /** Derived from logged history; null when there is none yet. */
+  suggestedLoadKg: number | null;
+  suggestionReason: string | null;
+  estimatedOneRepMax: number | null;
 };
 
 export type PlannedSessionProp = {
@@ -220,12 +224,14 @@ export function SessionView({
   upcoming,
   availableEquipment,
   equipmentProfileName,
+  fatigue,
 }: {
   exercises: CachedExercise[];
   planned: PlannedSessionProp;
   upcoming: UpcomingSessionProp[];
   availableEquipment: string[];
   equipmentProfileName: string | null;
+  fatigue: { status: string; note: string } | null;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
@@ -384,6 +390,20 @@ export function SessionView({
               </p>
             ) : null}
 
+            {/*
+              A pattern read from logged effort, not a verdict. An app knows what
+              you recorded, not how you feel.
+            */}
+            {fatigue && fatigue.status !== "on_track" ? (
+              <p
+                className={`mt-3 rounded-lg bg-surface-2 px-3 py-2 text-xs ${
+                  fatigue.status === "running_hot" ? "text-warning" : "text-muted"
+                }`}
+              >
+                {fatigue.note}
+              </p>
+            ) : null}
+
             <ol className="mt-3 flex flex-col gap-1">
               {planned.exercises.map((row) => (
                 <li
@@ -399,8 +419,15 @@ export function SessionView({
                       <span className="mt-0.5 block text-xs text-muted">{row.tempo}</span>
                     ) : null}
                   </span>
-                  <span className="shrink-0 font-mono text-xs text-muted">
-                    {describePrescription(row)}
+                  <span className="shrink-0 text-right">
+                    <span className="block font-mono text-xs text-muted">
+                      {describePrescription(row)}
+                    </span>
+                    {row.suggestedLoadKg !== null ? (
+                      <span className="block font-mono text-xs text-accent">
+                        {row.suggestedLoadKg} kg
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}
@@ -594,6 +621,21 @@ function ExerciseBlock({
         <p className="mt-1 text-xs text-accent">{prescription.notes}</p>
       ) : null}
 
+      {/* The load suggestion earns its place by explaining itself. */}
+      {prescription?.suggestionReason && done === 0 ? (
+        <p className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">
+          {prescription.suggestedLoadKg !== null ? (
+            <span className="font-mono text-accent">{prescription.suggestedLoadKg} kg · </span>
+          ) : null}
+          {prescription.suggestionReason}
+          {prescription.estimatedOneRepMax !== null ? (
+            <span className="mt-0.5 block opacity-70">
+              Estimated max {prescription.estimatedOneRepMax} kg.
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+
       {sets.length > 0 ? (
         <ol className="mt-3 flex flex-col gap-1">
           {sets.map((s, i) => (
@@ -636,7 +678,14 @@ function ExerciseBlock({
         key={last?.id ?? "empty"}
         fields={fields}
         initial={{
-          weight: last?.weightKg != null ? String(last.weightKg) : "",
+          // Prefill from the last set of this session; failing that, from the
+          // suggested load, so the first set of a planned exercise is one tap.
+          weight:
+            last?.weightKg != null
+              ? String(last.weightKg)
+              : prescription?.suggestedLoadKg != null
+                ? String(prescription.suggestedLoadKg)
+                : "",
           reps: last?.reps != null ? String(last.reps) : "",
           seconds: last?.timeSeconds != null ? String(last.timeSeconds) : "",
           rir: last?.rir != null ? String(last.rir) : "",
