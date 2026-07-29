@@ -179,6 +179,8 @@ export type PlannedRow = {
   suggestedLoadKg: number | null;
   suggestionReason: string | null;
   estimatedOneRepMax: number | null;
+  /** True when travel mode found nothing that could stand in. */
+  unavailable?: boolean;
 };
 
 export type PlannedSessionProp = {
@@ -225,6 +227,9 @@ export function SessionView({
   availableEquipment,
   equipmentProfileName,
   fatigue,
+  equipmentProfiles,
+  activeEquipmentId,
+  adaptationSummary,
 }: {
   exercises: CachedExercise[];
   planned: PlannedSessionProp;
@@ -232,6 +237,10 @@ export function SessionView({
   availableEquipment: string[];
   equipmentProfileName: string | null;
   fatigue: { status: string; note: string } | null;
+  equipmentProfiles: { id: string; name: string }[];
+  activeEquipmentId: string | null;
+  /** Present when the session has been re-fitted to different kit. */
+  adaptationSummary: string | null;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
@@ -408,15 +417,23 @@ export function SessionView({
               {planned.exercises.map((row) => (
                 <li
                   key={row.id}
-                  className="flex items-baseline justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2 text-sm"
+                  className={`flex items-baseline justify-between gap-3 rounded-lg px-3 py-2 text-sm ${
+                    row.unavailable ? "bg-surface-2 opacity-50" : "bg-surface-2"
+                  }`}
                 >
                   <span className="min-w-0">
-                    {row.exerciseName}
+                    <span className={row.unavailable ? "line-through" : ""}>
+                      {row.exerciseName}
+                    </span>
                     {row.supersetGroup ? (
                       <span className="ml-1.5 text-xs text-accent">superset</span>
                     ) : null}
                     {row.tempo ? (
                       <span className="mt-0.5 block text-xs text-muted">{row.tempo}</span>
+                    ) : null}
+                    {/* Swap explanations, so a substitution is never silent. */}
+                    {row.notes ? (
+                      <span className="mt-0.5 block text-xs text-muted">{row.notes}</span>
                     ) : null}
                   </span>
                   <span className="shrink-0 text-right">
@@ -446,6 +463,38 @@ export function SessionView({
             >
               Start this session
             </button>
+
+            {/*
+              Travel mode. Substitutes only what the equipment forces, so the
+              session stays recognisably the one that was planned, and says
+              plainly what it cannot cover.
+            */}
+            {equipmentProfiles.length > 1 ? (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="text-xs text-muted">Training somewhere else?</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {equipmentProfiles.map((profile) => {
+                    const active = profile.id === activeEquipmentId;
+                    return (
+                      <Link
+                        key={profile.id}
+                        href={`/?session=${planned.id}&equipment=${profile.id}`}
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                          active
+                            ? "border-accent text-accent"
+                            : "border-border text-muted hover:text-text"
+                        }`}
+                      >
+                        {profile.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+                {adaptationSummary ? (
+                  <p className="mt-2 text-xs text-muted">{adaptationSummary}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             {/*
               The plan is a queue, not a calendar. Training what you are set up

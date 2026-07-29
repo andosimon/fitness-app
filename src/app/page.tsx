@@ -2,6 +2,7 @@ import { AppNav } from "@/components/app-nav";
 import { SessionView, type PlannedSessionProp } from "@/components/session/session-view";
 import { listEquipmentProfiles, listExercises } from "@/lib/db/queries/exercises";
 import { getRecentFatigue, suggestLoadsForSession } from "@/lib/db/queries/progression";
+import { adaptPlannedSession } from "@/lib/db/queries/travel";
 import {
   getNextPlannedSession,
   getPlannedSessionById,
@@ -26,9 +27,9 @@ export const metadata = {
  * upper body.
  */
 export default async function TodayPage(props: {
-  searchParams: Promise<{ session?: string }>;
+  searchParams: Promise<{ session?: string; equipment?: string }>;
 }) {
-  const { session: chosenId } = await props.searchParams;
+  const { session: chosenId, equipment: equipmentId } = await props.searchParams;
 
   const [exercises, profiles, upcoming, planned] = await Promise.all([
     listExercises(),
@@ -61,6 +62,19 @@ export default async function TodayPage(props: {
 
   const byPlannedExercise = new Map(suggestions.map((s) => [s.plannedExerciseId, s]));
 
+  /**
+   * Travel mode. Re-fits the planned session to different kit, substituting only
+   * what the equipment forces and reporting anything it cannot cover.
+   */
+  const adapted =
+    planned && equipmentId && equipmentId !== defaultProfile?.id
+      ? await adaptPlannedSession(planned.id, equipmentId)
+      : null;
+
+  const adaptedByPlannedId = new Map(
+    (adapted?.rows ?? []).map((row) => [row.plannedExerciseId, row]),
+  );
+
   const plannedProp: PlannedSessionProp = planned
     ? {
         id: planned.id,
@@ -73,22 +87,37 @@ export default async function TodayPage(props: {
         notes: planned.notes,
         exercises: planned.exercises.map((row) => {
           const suggestion = byPlannedExercise.get(row.id);
+          const swap = adaptedByPlannedId.get(row.id);
+
+          // Under travel mode the row shows what will actually be performed,
+          // with the original named in the note so the swap is visible rather
+          // than silent.
+          const name = swap
+            ? (swap.replacementName ?? `${row.exerciseName} — not possible here`)
+            : row.exerciseName;
+
           return {
             id: row.id,
-            exerciseId: row.exerciseId,
-            exerciseName: row.exerciseName,
+            exerciseId: swap?.replacementExerciseId ?? row.exerciseId,
+            exerciseName: name,
             sets: row.sets,
-            repMin: row.repMin,
-            repMax: row.repMax,
+            repMin: swap ? swap.repMin : row.repMin,
+            repMax: swap ? swap.repMax : row.repMax,
             targetRir: row.targetRir,
             targetRpe: row.targetRpe,
             targetPercent1rm: row.targetPercent1rm,
             supersetGroup: row.supersetGroup,
             tempo: row.tempo,
-            notes: row.notes,
-            suggestedLoadKg: suggestion?.loadKg ?? null,
-            suggestionReason: suggestion?.reason ?? null,
-            estimatedOneRepMax: suggestion?.estimatedOneRepMax ?? null,
+            notes: swap && swap.outcome !== "kept" ? swap.note : row.notes,
+            // Loads are keyed to the planned exercise, so a substitution
+            // invalidates them — offering last week's bench load for a push-up
+            // would be worse than offering nothing.
+            suggestedLoadKg: swap && swap.outcome !== "kept" ? null : (suggestion?.loadKg ?? null),
+            suggestionReason:
+              swap && swap.outcome !== "kept" ? null : (suggestion?.reason ?? null),
+            estimatedOneRepMax:
+              swap && swap.outcome !== "kept" ? null : (suggestion?.estimatedOneRepMax ?? null),
+            unavailable: swap?.outcome === "dropped",
           };
         }),
       }
@@ -102,9 +131,16 @@ export default async function TodayPage(props: {
           exercises={exercises as CachedExercise[]}
           planned={plannedProp}
           upcoming={upcoming}
-          availableEquipment={(defaultProfile?.equipment ?? []) as Equipment[]}
-          equipmentProfileName={defaultProfile?.name ?? null}
+          availableEquipment={
+            (adapted
+              ? (profiles.find((p) => p.id === adapted.profileId)?.equipment ?? [])
+              : (defaultProfile?.equipment ?? [])) as Equipment[]
+          }
+          equipmentProfileName={adapted?.profileName ?? defaultProfile?.name ?? null}
           fatigue={fatigue.setsExamined >= 4 ? { status: fatigue.status, note: fatigue.note } : null}
+          equipmentProfiles={profiles.map((p) => ({ id: p.id, name: p.name }))}
+          activeEquipmentId={adapted?.profileId ?? defaultProfile?.id ?? null}
+          adaptationSummary={adapted?.summary ?? null}
         />
       </main>
     </>

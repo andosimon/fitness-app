@@ -20,7 +20,8 @@
     "program": "tsx scripts/preview-program.ts",
     "generate": "tsx scripts/generate-program.ts",
     "progress": "tsx scripts/preview-progression.ts",
-    "suggest": "tsx scripts/preview-suggestions.ts"
+    "suggest": "tsx scripts/preview-suggestions.ts",
+    "travel": "tsx scripts/preview-travel.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
