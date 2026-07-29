@@ -211,7 +211,11 @@ function findRelatedReference(
  */
 export async function getRecentFatigue(targetRir = 2): Promise<FatigueReading> {
   await requireAuth();
+  return unsafe_getRecentFatigue(targetRir);
+}
 
+/** See the note on `unsafe_createProgram` in ./programs. */
+export async function unsafe_getRecentFatigue(targetRir = 2): Promise<FatigueReading> {
   const since = new Date(Date.now() - FATIGUE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
   const rows = await getDb()
@@ -249,7 +253,11 @@ export type StrengthEstimate = {
  */
 export async function getStrengthEstimates(limit = 12): Promise<StrengthEstimate[]> {
   await requireAuth();
+  return unsafe_getStrengthEstimates(limit);
+}
 
+/** See the note on `unsafe_createProgram` in ./programs. */
+export async function unsafe_getStrengthEstimates(limit = 12): Promise<StrengthEstimate[]> {
   const rows = await getDb()
     .select({
       exerciseId: setLogs.exerciseId,

@@ -21,9 +21,11 @@
     "generate": "tsx scripts/generate-program.ts",
     "progress": "tsx scripts/preview-progression.ts",
     "suggest": "tsx scripts/preview-suggestions.ts",
-    "travel": "tsx scripts/preview-travel.ts"
+    "travel": "tsx scripts/preview-travel.ts",
+    "coach": "tsx scripts/preview-coach.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@neondatabase/serverless": "^1.1.0",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",

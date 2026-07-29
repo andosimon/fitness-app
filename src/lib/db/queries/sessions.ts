@@ -25,7 +25,11 @@ export type SessionSummary = {
 
 export async function listCompletedSessions(limit = 50): Promise<SessionSummary[]> {
   await requireAuth();
+  return unsafe_listCompletedSessions(limit);
+}
 
+/** See the note on `unsafe_createProgram` in ./programs. */
+export async function unsafe_listCompletedSessions(limit = 50): Promise<SessionSummary[]> {
   const rows = await getDb()
     .select({
       id: sessions.id,

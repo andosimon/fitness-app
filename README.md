@@ -125,18 +125,54 @@ The domain vocabulary — movement patterns, muscle groups, equipment, load type
 lives in [`src/lib/domain/types.ts`](src/lib/domain/types.ts) and deliberately has
 no database imports, so the engine can be tested in isolation.
 
+## The coach
+
+A Claude conversation with read access to the training log, at `/coach`. It is
+off unless both `FEATURE_COACH="true"` and `ANTHROPIC_API_KEY` are set; the page
+says which one is missing.
+
+**Grounded, not generic.** Eight tools — recent sessions, one exercise's history,
+estimated maxima, volume per muscle against the MEV/MAV/MRV landmarks, training
+cadence, the programme schedule, the next session, and the exercise library. The
+system prompt tells it to look things up before making claims and to say when the
+data is too thin, which for a log a few weeks old is often the honest answer.
+
+**Read-only on purpose.** The coach can recommend a change and explain why; it
+cannot make one. The engine decides what a session looks like, and a coach that
+could silently rewrite the programme would turn every conversation into something
+you have to supervise. Changes stay a deliberate act on the Program screen.
+
+**Consistency with the app is a hard requirement.** The coach counts a set the
+same way the generator budgets one (primary 1, secondary 0.5) and estimates a max
+with the same engine function the strength page uses. Two components disagreeing
+about the owner's bench max is worse than either being slightly wrong.
+
+`npm run coach` prints what every tool returns against the live database, which
+is how the grounding gets checked without spending a model call.
+
+### Cost and safety
+
+The key is server-side only and never reaches the browser. The system prompt is
+split into a fixed brief and a per-lifter snapshot, each with a cache breakpoint,
+so repeat questions re-read the expensive prefix at a tenth of the price. A
+per-process rate limit caps runaway loops — a guard against a retry storm, not a
+quota, since there is exactly one user behind a password.
+
+Training only: no nutrition, and anything that sounds medical gets pointed at a
+clinician rather than worked around.
+
 ## Roadmap
 
 | Phase | Scope                                                       | Status |
 | ----- | ----------------------------------------------------------- | ------ |
 | 0     | Scaffold, database wiring, session gate, deploy             | done   |
-| 1     | Exercise library + offline set logging (PWA)                | next   |
-| 2     | Generation engine: split → time budget → volume → selection |        |
-| 3     | Progression, autoregulation, deloads, travel mode           |        |
-| 4     | Claude coach with data-grounded tools                       |        |
-| 5     | Cardio and conditioning + analytics                        |        |
+| 1     | Exercise library + offline set logging (PWA)                | done   |
+| 2     | Generation engine: split → time budget → volume → selection | done   |
+| 3     | Progression, autoregulation, deloads, travel mode           | done   |
+| 4     | Claude coach with data-grounded tools                       | done   |
+| 5     | Cardio and conditioning + analytics                        | next   |
 
-Phase 1 lands before Phase 2 on purpose: logging is useful on its own, and the
+Phase 1 landed before Phase 2 on purpose: logging is useful on its own, and the
 engine needs real logged history before it has anything to progress from.
 
 ### Known open question

@@ -44,7 +44,11 @@ export type ExerciseListItem = {
  */
 export async function listExercises(): Promise<ExerciseListItem[]> {
   await requireAuth();
+  return unsafe_listExercises();
+}
 
+/** See the note on `unsafe_createProgram` in ./programs. */
+export async function unsafe_listExercises(): Promise<ExerciseListItem[]> {
   return getDb()
     .select({
       id: exercises.id,
