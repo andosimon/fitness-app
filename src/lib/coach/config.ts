@@ -54,9 +54,21 @@ export type CoachAvailability =
  * the two apart is the difference between a useful setup screen and a shrug.
  */
 export function coachAvailability(): CoachAvailability {
-  if (process.env.FEATURE_COACH !== "true") return { available: false, reason: "disabled" };
+  if (!isEnabled(process.env.FEATURE_COACH)) return { available: false, reason: "disabled" };
   if (!process.env.ANTHROPIC_API_KEY) return { available: false, reason: "no_key" };
   return { available: true };
+}
+
+/**
+ * Reads the flag leniently.
+ *
+ * A strict `=== "true"` is a trap for a value typed into a dashboard field:
+ * `True` and `TRUE` are obviously intended to mean on, and reading them as off
+ * produces a page insisting the feature is disabled while the variable plainly
+ * says otherwise. Anything unrecognised is still off, so the default holds.
+ */
+function isEnabled(value: string | undefined): boolean {
+  return ["true", "1", "yes", "on"].includes((value ?? "").trim().toLowerCase());
 }
 
 export function isCoachAvailable(): boolean {
